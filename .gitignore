@@ -1,0 +1,24 @@
+# Env files
+.env
+.env.local
+
+# Frontend
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Backend
+backend/__pycache__
+backend/**/__pycache__
+backend/venv
+backend/.venv
+backend/*.egg-info
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db

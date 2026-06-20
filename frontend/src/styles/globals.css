@@ -1,0 +1,76 @@
+@import "mapbox-gl/dist/mapbox-gl.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: #080c14;
+  color: #f1f5f9;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* Custom scrollbars for the sidebar / bottom sheet */
+.overflow-y-auto {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+/* Mapbox GL control restyling for the dark theme */
+.mapboxgl-ctrl-group {
+  background-color: rgba(10, 14, 22, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(16px);
+  border-radius: 0.75rem !important;
+  overflow: hidden;
+}
+
+.mapboxgl-ctrl-group button {
+  background-color: transparent !important;
+}
+
+.mapboxgl-ctrl-group button:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.mapboxgl-ctrl-icon {
+  filter: invert(1) brightness(1.5);
+}
+
+.mapboxgl-ctrl-attrib.mapboxgl-compact {
+  background-color: rgba(15, 15, 25, 0.6) !important;
+}
+
+.mapboxgl-ctrl-attrib a {
+  color: #94a3b8 !important;
+}
+
+.mapboxgl-canvas {
+  outline: none;
+}
