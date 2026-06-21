@@ -8,12 +8,13 @@ Uses a SINGLE combined query per request to avoid rate-limiting:
 
 import logging
 import math
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.models.parking import LotInfo, ParkingRules, ParkingSpot
+from app.models.parking import LotInfo, ParkingRules, ParkingSpot, ParkingTimeRule
 
 logger = logging.getLogger(__name__)
 
@@ -51,20 +52,20 @@ STREET_PARKING_VALUES = {
 LANE_SIDES = ("both", "left", "right")
 NO_LANE_PARKING_VALUES = {"no", "separate"}
 
-_AVG_CAR_LENGTH_M = 15.0
+_AVG_CAR_LENGTH_M = 25.0
 # Fraction of a way's length assumed usable for parking. Most driveways,
 # hydrants, corners, and bus stops aren't individually tagged in OSM, so this
 # is deliberately conservative (was 0.85, then 0.65) rather than a theoretical
 # maximum -- users have found real spots estimated on blocks with no actual
 # parking, and demo feedback found even 0.65 papered whole streets in markers.
 _DRIVEWAY_REDUCTION = 0.55
-_MAX_ESTIMATED_SPOTS = 30
-_ESTIMATE_MIN_LENGTH_M = 50.0
+_MAX_ESTIMATED_SPOTS = 15
+_ESTIMATE_MIN_LENGTH_M = 100.0
 # A way long enough to produce more than this many slots is almost always a
 # multi-block arterial Overpass returned as one way — estimating along its
 # full length floods the map with markers, so skip it entirely rather than
 # truncating (truncating would still place markers, just fewer of them).
-_MAX_SLOTS_PER_WAY = 20
+_MAX_SLOTS_PER_WAY = 8
 
 _ESTIMATION_HIGHWAYS = {
     "residential", "secondary", "tertiary", "unclassified", "living_street",
@@ -303,6 +304,135 @@ def _extract_rules(tags: Dict[str, str]) -> ParkingRules:
     )
 
 
+# ---------------------------------------------------------------------------
+# OSM-tag-derived time rules (Berkeley + any other city with no dedicated
+# open-data parking API) — far less complete than SFMTA's dataset
+# (sf_parking_db.py), since most OSM ways simply aren't tagged with posted
+# restrictions, but it surfaces real signal where it exists instead of
+# leaving every spot blank outside SF.
+# ---------------------------------------------------------------------------
+
+# Ordered longest-prefix-first so e.g. "hours" is consumed whole by "hours?"
+# rather than stopping at "h" and failing the trailing \b boundary check.
+_MAXSTAY_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)\b", re.IGNORECASE
+)
+_TIME_INTERVAL_RE = re.compile(r"^\s*([A-Za-z,\-]+)\s+(\d{1,2}:\d{2}-\d{1,2}:\d{2})\s*$")
+
+
+def _parse_maxstay_minutes(value: Optional[str]) -> Optional[int]:
+    """Parses OSM maxstay-style values ('2 hours', '1 hour', '30 minutes',
+    '90 min', '2h') into whole minutes. Returns None if no number+unit is
+    found (e.g. 'unlimited')."""
+    if not value:
+        return None
+    match = _MAXSTAY_RE.search(value.strip())
+    if not match:
+        return None
+    amount = float(match.group(1))
+    unit = match.group(2).lower()
+    return int(round(amount * 60)) if unit.startswith("h") else int(round(amount))
+
+
+def _parse_time_interval(value: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Parses a simple opening_hours-style interval like 'Mo-Fr 09:00-18:00'
+    (as used in parking:condition:*:time_interval) into (days, hours).
+    Returns (None, None) for anything more complex than that single shape."""
+    if not value:
+        return None, None
+    match = _TIME_INTERVAL_RE.match(value.strip())
+    if not match:
+        return None, None
+    return match.group(1), match.group(2)
+
+
+def parse_osm_time_rules(tags: Dict[str, str]) -> List[ParkingTimeRule]:
+    """Best-effort posted-rule extraction from OSM tags for a single real
+    (non-estimated) spot — maxstay/time-limit, no-parking conditions, paid
+    parking, and street cleaning. Returns an empty list when nothing is
+    tagged, which the frontend renders as "Check posted signs" — the
+    correct fallback for untagged streets."""
+    rules: List[ParkingTimeRule] = []
+
+    # 1. Time limit — maxstay, or parking:condition:{side}:maxstay.
+    maxstay_raw = tags.get("maxstay")
+    maxstay_side: Optional[str] = None
+    if not maxstay_raw:
+        for side in LANE_SIDES:
+            ms = tags.get(f"parking:condition:{side}:maxstay")
+            if ms:
+                maxstay_raw, maxstay_side = ms, side
+                break
+
+    if maxstay_raw:
+        max_stay_minutes = _parse_maxstay_minutes(maxstay_raw)
+
+        days, hours = None, None
+        for side in ([maxstay_side] if maxstay_side else LANE_SIDES):
+            interval = tags.get(f"parking:condition:{side}:time_interval")
+            if interval:
+                days, hours = _parse_time_interval(interval)
+                if days:
+                    break
+
+        description = (
+            f"Time limit: {maxstay_raw.strip()} · {days} {hours}"
+            if days and hours
+            else f"Time limit: {maxstay_raw.strip()} · Check posted signs"
+        )
+        rules.append(ParkingTimeRule(
+            rule_type="time_limit",
+            days=days or "Check posted signs",
+            hours=hours or "Check posted signs",
+            max_stay_minutes=max_stay_minutes,
+            description=description,
+        ))
+
+    # 2. No parking / no stopping — parking:condition:{side} = no_parking|no_stopping.
+    for side in LANE_SIDES:
+        condition = (tags.get(f"parking:condition:{side}") or "").lower()
+        if condition in _NO_PARKING_CONDITIONS:
+            interval = tags.get(f"parking:condition:{side}:time_interval")
+            days, hours = _parse_time_interval(interval) if interval else (None, None)
+            label = "No stopping" if condition == "no_stopping" else "No parking"
+            rules.append(ParkingTimeRule(
+                rule_type="no_parking",
+                days=days or "Check posted signs",
+                hours=hours or "Check posted signs",
+                description=(
+                    f"{label} · {days} {hours}" if days and hours
+                    else f"{label} · Check posted signs"
+                ),
+            ))
+            break  # one no-parking card is enough signal; avoid duplicating per side
+
+    # 3. Paid parking — parking:fee=yes, fee=yes, or amenity=parking_meter.
+    fee = (tags.get("parking:fee") or tags.get("fee") or "").lower()
+    is_meter = tags.get("amenity") == "parking_meter"
+    if fee in ("yes", "true") or is_meter:
+        charge = tags.get("charge") or tags.get("parking:fee:amount")
+        label = "Metered parking" if is_meter else "Paid parking"
+        rules.append(ParkingTimeRule(
+            rule_type="paid",
+            days="Every day",
+            hours="Check posted signs",
+            description=f"{label} — {charge}" if charge else label,
+        ))
+
+    # 4. Street cleaning — rare on OSM ways, but seen tagged on some streets.
+    cleaning_day = tags.get("cleaning_day") or tags.get("street_cleaning")
+    if cleaning_day:
+        rules.append(ParkingTimeRule(
+            rule_type="street_cleaning",
+            days=cleaning_day,
+            hours="Check posted signs",
+            description=f"Street cleaning · {cleaning_day}",
+            cleaning_day=cleaning_day,
+        ))
+
+    return rules
+
+
 def _compute_lot_info(tags: Dict[str, str]) -> LotInfo:
     fee_tag = (tags.get("fee") or "").strip().lower()
     charge = (tags.get("charge") or tags.get("parking:fee") or "").strip()
@@ -357,6 +487,7 @@ def _element_to_spot(element: Dict[str, Any]) -> Optional[ParkingSpot]:
         source="overpass",
         lot_info=_compute_lot_info(tags) if spot_type == "lot" else None,
         estimated=False,
+        time_rules=parse_osm_time_rules(tags),
     )
 
 

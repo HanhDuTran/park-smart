@@ -100,7 +100,7 @@ export function VoiceAssistantButton({
   const tooltipVisible = micPermissionDenied || (isIdle && showFirstUseTooltip);
 
   return (
-    <div className="absolute bottom-[calc(56px_+_env(safe-area-inset-bottom)_+_64px)] right-4 z-30 sm:bottom-24 sm:right-6">
+    <div className="absolute bottom-[calc(56px_+_env(safe-area-inset-bottom)_+_64px)] right-16 z-30 sm:bottom-24 sm:right-20">
       {tooltipVisible && (
         <div
           role="tooltip"

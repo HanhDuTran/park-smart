@@ -36,8 +36,8 @@ interface LatLngBounds {
   maxLng: number;
 }
 
-const BERKELEY_BOUNDS: LatLngBounds = { minLat: 37.85, maxLat: 37.91, minLng: -122.32, maxLng: -122.22 };
-const SF_BOUNDS: LatLngBounds = { minLat: 37.70, maxLat: 37.84, minLng: -122.52, maxLng: -122.35 };
+export const BERKELEY_BOUNDS: LatLngBounds = { minLat: 37.85, maxLat: 37.91, minLng: -122.32, maxLng: -122.22 };
+export const SF_BOUNDS: LatLngBounds = { minLat: 37.70, maxLat: 37.84, minLng: -122.52, maxLng: -122.35 };
 
 function isWithinBounds(loc: UserLocation, b: LatLngBounds): boolean {
   return loc.lat >= b.minLat && loc.lat <= b.maxLat && loc.lng >= b.minLng && loc.lng <= b.maxLng;
@@ -48,6 +48,16 @@ function isWithinBounds(loc: UserLocation, b: LatLngBounds): boolean {
 // than a genuine reason to abandon the rehearsed demo location.
 function isInKnownDemoArea(loc: UserLocation): boolean {
   return isWithinBounds(loc, BERKELEY_BOUNDS) || isWithinBounds(loc, SF_BOUNDS);
+}
+
+// Drives the location-aware "🎯 Demo Mode — Berkeley/San Francisco" badge
+// text in App.tsx, so the label tracks wherever the demo is actually running
+// instead of being hardcoded to one city.
+export function getCoverageAreaLabel(loc: UserLocation | null): "Berkeley" | "San Francisco" | null {
+  if (!loc) return null;
+  if (isWithinBounds(loc, BERKELEY_BOUNDS)) return "Berkeley";
+  if (isWithinBounds(loc, SF_BOUNDS)) return "San Francisco";
+  return null;
 }
 
 // Hard ceiling on how long we wait for a real GPS fix before silently
@@ -61,21 +71,39 @@ function isDemoModeRequested(): boolean {
   return new URLSearchParams(window.location.search).get("demo") === "1";
 }
 
+// True on localhost/127.0.0.1 — used so demo mode only skips real GPS when
+// the page is loaded over a LAN IP (e.g. a phone hitting the dev server over
+// plain HTTP, where mobile browsers block geolocation outright). Desktop
+// testing on localhost still gets real GPS, same as it always has.
+function isLocalhostRequested(): boolean {
+  if (typeof window === "undefined") return false;
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
 export function useUserLocation(): UseUserLocationResult {
-  const [location, setLocation] = useState<UserLocation | null>(null);
+  const [isDemoMode] = useState(isDemoModeRequested);
+  const [skipGps] = useState(() => isDemoModeRequested() && !isLocalhostRequested());
+  const [location, setLocation] = useState<UserLocation | null>(
+    skipGps ? DEMO_FALLBACK_LOCATION : null
+  );
   const [heading, setHeading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!skipGps);
   const [isApproximate, setIsApproximate] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [isDemoMode] = useState(isDemoModeRequested);
 
   const resolvedRef = useRef(false);
 
   useEffect(() => {
     resolvedRef.current = false;
     setPermissionDenied(false);
+
+    // Demo mode on a LAN IP never touches navigator.geolocation: location is
+    // already pinned to DEMO_FALLBACK_LOCATION above, with loading already
+    // false. Demo mode on localhost falls through and still asks for real
+    // GPS, same as non-demo mode (see isInKnownDemoArea below).
+    if (skipGps) return;
 
     // Demo mode still asks for real GPS — it just falls back to a fixed
     // Berkeley location instead of giving up, and is pickier about trusting
@@ -144,7 +172,7 @@ export function useUserLocation(): UseUserLocationResult {
       clearTimeout(fallbackTimer);
       navigator.geolocation.clearWatch(watchId);
     };
-  }, [attempt, isDemoMode]);
+  }, [attempt, isDemoMode, skipGps]);
 
   const retry = useCallback(() => {
     setLoading(true);

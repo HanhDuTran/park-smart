@@ -8,7 +8,10 @@ import type {
 import { haversineDistance, sortByDistance } from "../utils/distance";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-const DEFAULT_RADIUS = 1000;
+// 1000m was pulling in every individually-tagged OSM parking lot node near
+// dense areas like the UC Berkeley campus, flooding the map with markers —
+// 350m keeps results walking-distance-relevant and the marker count sane.
+const DEFAULT_RADIUS = 350;
 const REFETCH_DISTANCE_M = 100;
 const POLL_INTERVAL_MS = 15_000;
 

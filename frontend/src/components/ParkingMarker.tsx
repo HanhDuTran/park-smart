@@ -29,10 +29,25 @@ function streetIconStyle(liveStatus: LiveStatus | null): {
   border: string;
   opacity: string;
 } {
+  if (liveStatus === "available") {
+    return { bg: "#10b981", border: "rgba(255,255,255,0.6)", opacity: "1" };
+  }
+  if (liveStatus === "pending") {
+    return { bg: "#f59e0b", border: "rgba(255,255,255,0.6)", opacity: "1" };
+  }
   if (liveStatus === "taken") {
-    return { bg: "#1e293b", border: "rgba(239,68,68,0.7)", opacity: "0.75" };
+    return { bg: "#ef4444", border: "rgba(255,255,255,0.6)", opacity: "1" };
   }
   return { bg: "#3b82f6", border: "rgba(255,255,255,0.6)", opacity: "1" };
+}
+
+/** Pulsing glow class matching the icon's fill color — pending/taken stay
+ * still since a pulsing "come park here" glow would contradict their meaning. */
+function glowPulseClass(liveStatus: LiveStatus | null, estimated?: boolean): string | null {
+  if (estimated) return null;
+  if (liveStatus === "available") return "animate-glow-pulse-green";
+  if (liveStatus == null) return "animate-glow-pulse-blue";
+  return null;
 }
 
 export function createParkingMarkerElement(
@@ -73,9 +88,8 @@ export function createParkingMarkerElement(
     icon.style.opacity = estimated ? "0.45" : opacity;
     icon.style.filter = "drop-shadow(0 4px 10px rgba(0,0,0,0.7))";
     icon.style.animationDelay = glowDelay(spot.id);
-    if (liveStatus !== "taken" && !estimated) {
-      icon.classList.add("animate-glow-pulse-blue");
-    }
+    const pulseClass = glowPulseClass(liveStatus, estimated);
+    if (pulseClass) icon.classList.add(pulseClass);
   } else {
     icon.className =
       "relative flex items-center justify-center w-11 h-11 rounded-xl " +
@@ -179,6 +193,9 @@ export function updateParkingMarkerState(
     icon.style.background = bg;
     icon.style.border = isEstimated ? `2px dashed ${border}` : `3px solid ${border}`;
     icon.style.opacity = isEstimated ? "0.45" : opacity;
+    icon.classList.remove("animate-glow-pulse-blue", "animate-glow-pulse-green");
+    const pulseClass = glowPulseClass(liveStatus, isEstimated);
+    if (pulseClass) icon.classList.add(pulseClass);
   }
 }
 

@@ -22,6 +22,7 @@ interface BottomSheetProps {
   onClose: () => void;
   onNavigate: (spot: ParkingSpotWithDistance) => void;
   onReportPark: (spotId: string) => Promise<boolean>;
+  onConfirmPark: (spotId: string, parked: boolean) => Promise<boolean>;
   onConfirmLeave: (spotId: string, left: boolean) => Promise<boolean>;
   isParkedMode?: boolean;
   countdown?: ParkedCountdown | null;
@@ -35,6 +36,8 @@ const MOBILE_BREAKPOINT_PX = 768;
 const DISMISS_THRESHOLD_PX = 100;
 const EXPAND_THRESHOLD_PX = -60;
 const COLLAPSE_THRESHOLD_PX = 60;
+const CONFIRM_PARK_WINDOW_MS = 60_000;
+const TOAST_MS = 2000;
 
 function InlineSpinner() {
   return (
@@ -83,6 +86,48 @@ function StatusButton({
   );
 }
 
+function ParkConfirmPrompt({
+  onYes,
+  onNo,
+  busy,
+}: {
+  onYes: () => void;
+  onNo: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="flex flex-1 flex-col gap-1.5 rounded-xl border border-accent/40 bg-accent/10 px-2 py-1.5">
+      <p className="text-center text-[11px] font-bold leading-tight text-accent-light">
+        Confirm you parked?
+      </p>
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={onYes}
+          disabled={busy}
+          className="flex min-h-[26px] flex-1 items-center justify-center rounded-lg border border-lot/40 bg-lot/15 text-xs font-bold text-lot transition-colors hover:bg-lot/25 disabled:opacity-70"
+        >
+          {busy ? <InlineSpinner /> : "Yes"}
+        </button>
+        <button
+          type="button"
+          onClick={onNo}
+          disabled={busy}
+          className="flex min-h-[26px] flex-1 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-xs font-semibold text-textMuted transition-colors hover:bg-white/10 disabled:opacity-70"
+        >
+          No
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SuccessToast({ message }: { message: string }) {
+  return (
+    <p className="mt-2 animate-fade-in-up text-center text-xs font-bold text-lot">{message}</p>
+  );
+}
+
 function formatCountdown(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -125,6 +170,7 @@ export function BottomSheet({
   onClose,
   onNavigate,
   onReportPark,
+  onConfirmPark,
   onConfirmLeave,
   isParkedMode = false,
   countdown = null,
@@ -134,8 +180,13 @@ export function BottomSheet({
   const [leaveState, setLeaveState] = useState<ActionState>("idle");
   const [sheetPosition, setSheetPosition] = useState<SheetPosition>("half");
   const [dragY, setDragY] = useState(0);
+  const [confirmingPark, setConfirmingPark] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const parkRevertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveRevertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmAutoRevertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragStartYRef = useRef<number | null>(null);
 
   // A newly-selected spot starts with fresh button/position state.
@@ -143,11 +194,22 @@ export function BottomSheet({
     setParkState("idle");
     setLeaveState("idle");
     setSheetPosition("half");
+    setConfirmingPark(false);
+    setConfirmBusy(false);
+    setToast(null);
     return () => {
       if (parkRevertTimer.current) clearTimeout(parkRevertTimer.current);
       if (leaveRevertTimer.current) clearTimeout(leaveRevertTimer.current);
+      if (confirmAutoRevertTimer.current) clearTimeout(confirmAutoRevertTimer.current);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
     };
   }, [spot?.id]);
+
+  const showToast = (message: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(message);
+    toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
+  };
 
   const handleReportPark = async () => {
     if (!spot || parkState === "loading") return;
@@ -156,9 +218,40 @@ export function BottomSheet({
     const ok = await onReportPark(spot.id);
     if (ok) {
       setParkState("idle");
+      showToast("✓ Reported!");
+      // Backend already auto-confirms "taken" after the same window if the
+      // user never responds — this timer just reverts our own prompt UI.
+      if (confirmAutoRevertTimer.current) clearTimeout(confirmAutoRevertTimer.current);
+      confirmAutoRevertTimer.current = setTimeout(
+        () => setConfirmingPark(false),
+        CONFIRM_PARK_WINDOW_MS
+      );
+      setConfirmingPark(true);
     } else {
       setParkState("error");
       parkRevertTimer.current = setTimeout(() => setParkState("idle"), ERROR_REVERT_MS);
+    }
+  };
+
+  const handleConfirmParkYes = async () => {
+    if (!spot || confirmBusy) return;
+    setConfirmBusy(true);
+    const ok = await onConfirmPark(spot.id, true);
+    setConfirmBusy(false);
+    if (ok) {
+      if (confirmAutoRevertTimer.current) clearTimeout(confirmAutoRevertTimer.current);
+      setConfirmingPark(false);
+    }
+  };
+
+  const handleConfirmParkNo = async () => {
+    if (!spot || confirmBusy) return;
+    setConfirmBusy(true);
+    const ok = await onConfirmPark(spot.id, false);
+    setConfirmBusy(false);
+    if (ok) {
+      if (confirmAutoRevertTimer.current) clearTimeout(confirmAutoRevertTimer.current);
+      setConfirmingPark(false);
     }
   };
 
@@ -169,6 +262,9 @@ export function BottomSheet({
     const ok = await onConfirmLeave(spot.id, true);
     if (ok) {
       setLeaveState("idle");
+      showToast("✓ Reported!");
+      if (confirmAutoRevertTimer.current) clearTimeout(confirmAutoRevertTimer.current);
+      setConfirmingPark(false);
     } else {
       setLeaveState("error");
       leaveRevertTimer.current = setTimeout(() => setLeaveState("idle"), ERROR_REVERT_MS);
@@ -211,7 +307,7 @@ export function BottomSheet({
           animate={{ y: dragY, opacity: 1 }}
           exit={{ y: "100%", opacity: 0 }}
           transition={dragY !== 0 ? { duration: 0 } : { type: "spring", damping: 30, stiffness: 300 }}
-          className={`fixed inset-x-0 bottom-0 z-40 rounded-t-3xl border-t border-white/10 bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black/60 backdrop-blur-glass sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:w-[28rem] sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:border-white/10 sm:p-6 md:left-[23rem] md:translate-x-0 ${
+          className={`fixed inset-x-0 bottom-0 z-[45] rounded-t-3xl border-t border-white/10 bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black/60 backdrop-blur-glass sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:w-[28rem] sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:border-white/10 sm:p-6 md:left-[23rem] md:translate-x-0 ${
             sheetPosition === "full" ? "max-h-[85vh] overflow-y-auto" : ""
           }`}
         >
@@ -249,6 +345,25 @@ export function BottomSheet({
                 <div className="mt-4 flex flex-col gap-3">
                   {countdown && <ParkedCountdownDisplay countdown={countdown} />}
                   <div className="flex gap-2">
+                    {spot.type === "street" &&
+                      !spot.estimated &&
+                      (confirmingPark ? (
+                        <ParkConfirmPrompt
+                          onYes={handleConfirmParkYes}
+                          onNo={handleConfirmParkNo}
+                          busy={confirmBusy}
+                        />
+                      ) : (
+                        <StatusButton
+                          state={parkState}
+                          onClick={handleReportPark}
+                          idleLabel={
+                            <>
+                              <span>📍</span> I parked here
+                            </>
+                          }
+                        />
+                      ))}
                     <StatusButton
                       state={leaveState}
                       onClick={handleConfirmLeave}
@@ -260,6 +375,7 @@ export function BottomSheet({
                       }
                     />
                   </div>
+                  {toast && <SuccessToast message={toast} />}
                   {onFindNextSpot && (
                     <button
                       type="button"
@@ -272,29 +388,43 @@ export function BottomSheet({
                 </div>
               ) : (
                 <>
-                  {/* Manual test buttons for street spots */}
-                  {spot.type === "street" && (
-                    <div className="mt-4 flex gap-2">
-                      <StatusButton
-                        state={parkState}
-                        onClick={handleReportPark}
-                        idleLabel={
-                          <>
-                            <span>📍</span> I parked here
-                          </>
-                        }
-                      />
-                      <StatusButton
-                        state={leaveState}
-                        onClick={handleConfirmLeave}
-                        idleLabel={
-                          <>
-                            <span>🚗</span> I&apos;m leaving
-                          </>
-                        }
-                      />
-                    </div>
-                  )}
+                  {spot.type === "street" &&
+                    (spot.estimated ? (
+                      <p className="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs leading-relaxed text-textMuted">
+                        Live status reporting isn&apos;t available for estimated spots — there&apos;s
+                        no verified location to track it against.
+                      </p>
+                    ) : (
+                      <div className="mt-4 flex gap-2">
+                        {confirmingPark ? (
+                          <ParkConfirmPrompt
+                            onYes={handleConfirmParkYes}
+                            onNo={handleConfirmParkNo}
+                            busy={confirmBusy}
+                          />
+                        ) : (
+                          <StatusButton
+                            state={parkState}
+                            onClick={handleReportPark}
+                            idleLabel={
+                              <>
+                                <span>📍</span> I parked here
+                              </>
+                            }
+                          />
+                        )}
+                        <StatusButton
+                          state={leaveState}
+                          onClick={handleConfirmLeave}
+                          idleLabel={
+                            <>
+                              <span>🚗</span> I&apos;m leaving
+                            </>
+                          }
+                        />
+                      </div>
+                    ))}
+                  {toast && <SuccessToast message={toast} />}
 
                   <div className="mt-3 flex gap-2">
                     <button

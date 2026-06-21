@@ -18,7 +18,7 @@ import { useParkingData } from "./hooks/useParkingData";
 import { useParkedDetection } from "./hooks/useParkedDetection";
 import { useParkedTimer } from "./hooks/useParkedTimer";
 import { useRoute } from "./hooks/useRoute";
-import { useUserLocation } from "./hooks/useUserLocation";
+import { getCoverageAreaLabel, useUserLocation } from "./hooks/useUserLocation";
 import type { VoiceAction } from "./hooks/useVoiceAssistant";
 import { useVoiceAssistant } from "./hooks/useVoiceAssistant";
 import type { ParkingSpotWithDistance, UserLocation } from "./types/parking";
@@ -49,6 +49,7 @@ export default function App() {
     retry: retryLocation,
   } = useUserLocation();
   const [approximateBannerDismissed, setApproximateBannerDismissed] = useState(false);
+  const demoAreaLabel = getCoverageAreaLabel(location);
 
   // Browsing a searched place re-centers the parking-data fetch (so "nearby
   // parking" reflects the searched area) without touching the real GPS
@@ -264,7 +265,7 @@ export default function App() {
 
       {isDemoMode && (
         <div className="absolute left-4 top-24 z-30 flex items-center gap-2 rounded-full border border-primary/30 bg-surface px-3 py-1.5 text-xs font-semibold text-primary-light shadow-2xl shadow-black/60 backdrop-blur-glass">
-          <span>🎯 Demo Mode</span>
+          <span>🎯 Demo Mode{demoAreaLabel ? ` — ${demoAreaLabel}` : ""}</span>
           <button
             type="button"
             onClick={handleExitDemoMode}
@@ -310,6 +311,7 @@ export default function App() {
           onClose={() => setSelectedSpotId(null)}
           onNavigate={handleNavigate}
           onReportPark={reportPark}
+          onConfirmPark={confirmPark}
           onConfirmLeave={confirmLeave}
           isParkedMode={mode === "parked"}
           countdown={mode === "parked" ? parkedCountdown : null}

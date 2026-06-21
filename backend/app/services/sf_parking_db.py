@@ -43,6 +43,13 @@ MAX_SWEEPING_RULES = 5
 # spots well outside San Francisco.
 SF_BOUNDS = (37.70, 37.84, -122.52, -122.35)
 
+# Berkeley has no equivalent open-data parking-regulation API, so there's no
+# local DB to query for it — this bbox exists only to make that "skip
+# SF-DB enrichment here" decision explicit rather than an incidental
+# byproduct of falling outside SF_BOUNDS. Real signal for Berkeley spots
+# comes from OSM tags instead (see overpass.parse_osm_time_rules).
+BERKELEY_BOUNDS = (37.84, 37.91, -122.32, -122.24)
+
 
 # ---------------------------------------------------------------------------
 # DB connection / schema
@@ -548,14 +555,27 @@ def _in_sf_bounds(lat: float, lng: float) -> bool:
     return min_lat <= lat <= max_lat and min_lng <= lng <= max_lng
 
 
+def _in_berkeley_bounds(lat: float, lng: float) -> bool:
+    min_lat, max_lat, min_lng, max_lng = BERKELEY_BOUNDS
+    return min_lat <= lat <= max_lat and min_lng <= lng <= max_lng
+
+
 def get_signs_near_batch(
     coords: List[Tuple[float, float]], radius_m: float = DEFAULT_RADIUS_M
 ) -> List[List[SignRule]]:
     """Batched version of get_signs_near sharing one DB connection — use this
     when enriching many spots in a single request instead of opening/closing
-    a connection per spot. Each result list is empty for coords outside SF."""
+    a connection per spot. Each result list is empty for coords outside SF —
+    this includes Berkeley (BERKELEY_BOUNDS), which has no equivalent DB and
+    relies on OSM-tag-derived time_rules (overpass.parse_osm_time_rules)
+    instead of this enrichment step."""
     if not is_db_populated():
         return [[] for _ in coords]
+    if any(_in_berkeley_bounds(lat, lng) for lat, lng in coords):
+        logger.debug(
+            "Skipping SF-DB enrichment for Berkeley coord(s) in this batch; "
+            "relying on OSM tags instead"
+        )
     conn = get_db()
     try:
         return [

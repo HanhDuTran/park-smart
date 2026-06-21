@@ -39,7 +39,7 @@ export function useMapbox({ center, zoom = 15 }: UseMapboxOptions): UseMapboxRes
     mapInstance.addControl(new mapboxgl.AttributionControl({ compact: true }));
     mapInstance.addControl(
       new mapboxgl.NavigationControl({ visualizePitch: true }),
-      "top-right"
+      "bottom-right"
     );
 
     mapRef.current = mapInstance;

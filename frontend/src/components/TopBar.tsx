@@ -108,14 +108,14 @@ export function TopBar({
 
   return (
     <header className="absolute inset-x-0 top-0 z-30">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-background/98 via-background/60 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background/98 via-background/60 to-transparent" />
 
-      <div className="relative px-4 pt-4 sm:px-6 sm:pt-5">
-        <div className="flex items-center gap-3 rounded-2xl border border-white/8 bg-surface px-3 py-2.5 shadow-2xl shadow-black/60 backdrop-blur-glass sm:gap-4 sm:px-4 sm:py-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-dark shadow-glow sm:h-12 sm:w-12">
+      <div className="relative px-4 pt-2 sm:px-6 sm:pt-2.5">
+        <div className="flex items-center gap-3 rounded-2xl border border-white/8 bg-surface px-3 py-1.5 shadow-2xl shadow-black/60 backdrop-blur-glass sm:gap-4 sm:px-4 sm:py-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-dark shadow-glow sm:h-9 sm:w-9">
             <svg
-              width="24"
-              height="24"
+              width="18"
+              height="18"
               viewBox="0 0 32 32"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
@@ -139,7 +139,7 @@ export function TopBar({
             </span>
           </div>
 
-          <div className="relative flex-1">
+          <div className="relative mx-auto w-full min-w-0 max-w-2xl">
             <SearchIcon />
             <input
               ref={inputRef}
@@ -152,7 +152,7 @@ export function TopBar({
               onFocus={() => setIsOpen(true)}
               onBlur={() => setIsOpen(false)}
               placeholder={placeholder}
-              className="w-full rounded-full border border-white/8 bg-black/50 py-3 pl-11 pr-5 text-sm text-textPrimary shadow-inner shadow-black/40 placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary/50 sm:text-sm"
+              className="w-full rounded-full border border-white/8 bg-black/50 py-1.5 pl-11 pr-5 text-sm text-textPrimary shadow-inner shadow-black/40 placeholder:text-textMuted focus:outline-none focus:ring-2 focus:ring-primary/50 sm:text-sm"
             />
             {(loading || retrieving) && <Spinner />}
 
